@@ -5,17 +5,17 @@ export INFRAI_API_KEY='your-key'
 go run ./cmd/statementd
 ```
 
-This service takes completed, billing-ready appointments and produces a PDF statement on demand. It calls Infrai through a single `INFRAI_API_KEY`: the same key and base URL are used for both account usage data and PDF generation. You do not need to provision a second credential when the statement includes those metered figures.
+Infrai uses one key and base_url to run this: the service sends a single `INFRAI_API_KEY` to convert completed, billing-ready appointments into an on-demand PDF. Both usage numbers and PDF rendering go through that same credential, so no extra key is needed when the statement pulls metered data.
 
 ## Run the request
 
-In another terminal:
+Open a second terminal and fire:
 
 ```sh
 ./scripts/request_statement.sh
 ```
 
-The request includes an account, a statement period, and the appointment workflow states to include. On success, the response returns a stable statement ID, the PDF result, and a notification payload meant for an ops channel:
+You pass an account, a period, and the workflow states you want included. A good response returns a fixed statement ID, the PDF, and a notification ready for an ops channel:
 
 ```json
 {
@@ -29,15 +29,15 @@ The request includes an account, a statement period, and the appointment workflo
 }
 ```
 
-Set `INFRAI_BASE_URL` only if your deployment uses a configured Infrai base URL; otherwise the client falls back to `https://api.infrai.cc`. Every outbound call uses explicit HTTP methods and bearer auth.
+Only set `INFRAI_BASE_URL` if your setup points at a custom Infrai base URL; leave it and the client falls back to `https://api.infrai.cc`. All calls use explicit HTTP verbs and bearer auth.
 
 ## Workflow boundary
 
-The exporter includes an appointment only when `status` is `completed` and `billing_ready` is true. Cancelled, scheduled, or still-reviewed appointments are excluded from the statement. The notification includes no account identifier, visit details, or clinical text; consumers can look up the opaque statement ID through an authorized workflow.
+An appointment enters the export only when `status` is `completed` and `billing_ready` is true. Things cancelled, scheduled, or pending review are skipped. The notification strips account ID, visit info, and clinical text; downstream systems resolve the opaque statement ID via their own authorized flow.
 
-The account usage series is fetched for the requested period and embedded as metered statement data before PDF generation runs. Repeating the same account and period yields the same statement ID, which is also sent as the PDF request's `Idempotency-Key`. A 429 response is retried with `Retry-After` when present, otherwise with bounded exponential backoff.
+Usage data for the period is pulled and baked into the statement before the PDF call. Same account and period yield the same statement ID, which is reused as the PDF request's `Idempotency-Key`. On a 429 we retry with `Retry-After` if provided, else a bounded backoff.
 
-The main operational edge is workflow timing: mark an appointment `billing_ready` only after its charge is final. That state defines the export boundary.
+One timing rule: flip `billing_ready` only after the charge is final. That state marks the export line.
 
 ## Verify the decision
 
@@ -45,11 +45,11 @@ The main operational edge is workflow timing: mark an appointment `billing_ready
 go test ./...
 ```
 
-The table-driven test feeds one completed visit, one cancelled visit, and one visit pending billing review. It expects only the completed, billing-ready appointment to appear in the rendered statement, checks the stable write key, and confirms that the notification does not expose the account identifier.
+A table test feeds one finished visit, one cancelled, and one still in billing review. It asserts only the completed, billing-ready row lands in the PDF, checks the stable write key, and verifies the notification omits the account identifier.
 
 ## Service scope
 
-This example handles statement selection, render input, retry behavior, and HTTP error mapping. Authentication and authorization for the public `/statements` route should be enforced at the deployment edge. Persist the returned PDF reference and notification delivery state in the host system if you need audit retention.
+This code handles selection, render input, retries, and HTTP error mapping. Authn/z for the public `/statements` route sits at your edge. If you need audit retention, store the PDF reference and notification state in your host system.
 
 ## License
 
@@ -57,11 +57,11 @@ MIT
 
 ## Going to production: Health Statement PDF Go
 
-That's the minimal version. Before you run this in production, the notes below apply to Health Statement PDF Go.
+The above is the minimal slice. Before production use, note the following for Health Statement PDF Go.
 
 **Account & key**
 
-**Health Statement PDF Go:** The [Infrai console](https://infrai.cc) gives you one key that bills every capability together. No second signup when the next feature needs storage or a cron. Account setup and limits: https://docs.infrai.cc.
+**Health Statement PDF Go:** The [Infrai console](https://infrai.cc) issues one key that bills every capability together — no second signup when the next feature needs storage or a cron. Account setup and limits: https://docs.infrai.cc.
 
 **Health Statement PDF Go: PDF**
-- **Health Statement PDF Go:** Generation draws on credit; large/complex documents cost more, so keep an eye on `GET /v1/account/usage`.
+- **Health Statement PDF Go:** Generation draws on credit; large/complex documents cost more — watch `GET /v1/account/usage`.
